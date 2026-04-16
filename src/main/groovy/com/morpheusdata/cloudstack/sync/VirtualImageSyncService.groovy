@@ -26,7 +26,8 @@ class VirtualImageSyncService {
         log.debug("Syncing CloudStack templates for cloud: ${cloud.name}")
         try {
             def config = cloud.configMap
-            def result = apiClient.listTemplates(config.apiUrl, config.apiKey, config.secretKey, [:])
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
+            def result = apiClient.listTemplates(config.apiUrl, config.apiKey, config.secretKey, domainParams)
             if (!result.success) {
                 log.error("Failed to list templates: ${result.error}")
                 return

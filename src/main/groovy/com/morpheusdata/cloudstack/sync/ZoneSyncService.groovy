@@ -26,7 +26,8 @@ class ZoneSyncService {
         log.debug("Syncing CloudStack zones for cloud: ${cloud.name}")
         try {
             def config = cloud.configMap
-            def result = apiClient.listZones(config.apiUrl, config.apiKey, config.secretKey, [:])
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
+            def result = apiClient.listZones(config.apiUrl, config.apiKey, config.secretKey, domainParams)
             if (!result.success) {
                 log.error("Failed to list zones: ${result.error}")
                 return

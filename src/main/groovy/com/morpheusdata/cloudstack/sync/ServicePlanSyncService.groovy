@@ -26,7 +26,8 @@ class ServicePlanSyncService {
         log.debug("Syncing CloudStack service offerings for cloud: ${cloud.name}")
         try {
             def config = cloud.configMap
-            def result = apiClient.listServiceOfferings(config.apiUrl, config.apiKey, config.secretKey, [:])
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
+            def result = apiClient.listServiceOfferings(config.apiUrl, config.apiKey, config.secretKey, domainParams)
             if (!result.success) {
                 log.error("Failed to list service offerings: ${result.error}")
                 return

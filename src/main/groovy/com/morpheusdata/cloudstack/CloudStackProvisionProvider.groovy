@@ -19,6 +19,10 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
     MorpheusContext morpheusContext
     CloudStackApiClient apiClient
 
+    private static final int ASYNC_MAX_RETRIES = 60
+    private static final long ASYNC_INITIAL_DELAY_MS = 2000L
+    private static final long ASYNC_MAX_DELAY_MS = 30000L
+
     CloudStackProvisionProvider(Plugin plugin, MorpheusContext morpheusContext) {
         this.plugin = plugin
         this.morpheusContext = morpheusContext
@@ -149,21 +153,34 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
             ComputeServer server = workload.server
             Cloud cloud = server.cloud
             def config = cloud.configMap
-
             def serverConfig = server.configMap
+
             def deployParams = [
                 serviceofferingid: serverConfig?.serviceOfferingId,
-                templateid: serverConfig?.templateId,
-                zoneid: serverConfig?.zoneId,
-                name: server.name,
-                displayname: server.name
+                templateid       : serverConfig?.templateId,
+                zoneid           : serverConfig?.zoneId,
+                name             : server.name,
+                displayname      : server.name
             ]
+
+            // Scope to domain when configured
+            if (config.domainId) {
+                deployParams.domainid = config.domainId
+            }
 
             if (serverConfig?.networkId) {
                 deployParams.networkids = serverConfig.networkId
             }
+
             if (serverConfig?.keypair) {
                 deployParams.keypair = serverConfig.keypair
+            }
+
+            // Inject cloud-init / user-data (Base64-encoded, max 32 KB per CloudStack spec)
+            def userData = workloadRequest?.cloudConfigUser ?: opts?.userdata
+            if (userData) {
+                def encoded = Base64.encoder.encodeToString(userData.toString().getBytes('UTF-8'))
+                deployParams.userdata = encoded
             }
 
             def result = apiClient.deployVirtualMachine(config.apiUrl, config.apiKey, config.secretKey, deployParams)
@@ -173,22 +190,27 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
                 return ServiceResponse.error(provisionResponse.message, null, provisionResponse)
             }
 
-            def jobId = result.data?.jobid
+            def jobId = result.data?.deployvirtualmachineresponse?.jobid
             if (jobId) {
-                def jobResult = pollAsyncJob(config.apiUrl, config.apiKey, config.secretKey, jobId)
+                def jobResult = pollAsyncJobWithBackoff(config.apiUrl, config.apiKey, config.secretKey, jobId)
                 if (jobResult.success) {
                     def vmData = jobResult.data?.jobresult?.virtualmachine
                     provisionResponse.success = true
                     provisionResponse.externalId = vmData?.id
                     provisionResponse.publicIp = vmData?.nic?.find { it.isdefault }?.ipaddress
                     provisionResponse.hostname = vmData?.name
+
+                    // Apply Morpheus tags to the provisioned VM
+                    if (vmData?.id) {
+                        applyTags(config, vmData.id, server.name, opts?.tags as Map)
+                    }
                 } else {
                     provisionResponse.success = false
                     provisionResponse.message = "VM deployment job failed: ${jobResult.error}"
                     return ServiceResponse.error(provisionResponse.message, null, provisionResponse)
                 }
             } else {
-                def vmData = result.data?.virtualmachine
+                def vmData = result.data?.deployvirtualmachineresponse
                 provisionResponse.success = true
                 provisionResponse.externalId = vmData?.id
             }
@@ -217,8 +239,9 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
             if (!result.success) {
                 return ServiceResponse.error("Failed to stop VM: ${result.error}")
             }
-            if (result.data?.jobid) {
-                def jobResult = pollAsyncJob(config.apiUrl, config.apiKey, config.secretKey, result.data.jobid)
+            def jobId = result.data?.stopvirtualmachineresponse?.jobid
+            if (jobId) {
+                def jobResult = pollAsyncJobWithBackoff(config.apiUrl, config.apiKey, config.secretKey, jobId)
                 return jobResult.success ? ServiceResponse.success() : ServiceResponse.error("Stop job failed: ${jobResult.error}")
             }
             return ServiceResponse.success()
@@ -239,8 +262,9 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
             if (!result.success) {
                 return ServiceResponse.error("Failed to start VM: ${result.error}")
             }
-            if (result.data?.jobid) {
-                def jobResult = pollAsyncJob(config.apiUrl, config.apiKey, config.secretKey, result.data.jobid)
+            def jobId = result.data?.startvirtualmachineresponse?.jobid
+            if (jobId) {
+                def jobResult = pollAsyncJobWithBackoff(config.apiUrl, config.apiKey, config.secretKey, jobId)
                 return jobResult.success ? ServiceResponse.success() : ServiceResponse.error("Start job failed: ${jobResult.error}")
             }
             return ServiceResponse.success()
@@ -268,8 +292,9 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
             if (!result.success) {
                 return ServiceResponse.error("Failed to destroy VM: ${result.error}")
             }
-            if (result.data?.jobid) {
-                def jobResult = pollAsyncJob(config.apiUrl, config.apiKey, config.secretKey, result.data.jobid)
+            def jobId = result.data?.destroyvirtualmachineresponse?.jobid
+            if (jobId) {
+                def jobResult = pollAsyncJobWithBackoff(config.apiUrl, config.apiKey, config.secretKey, jobId)
                 return jobResult.success ? ServiceResponse.success() : ServiceResponse.error("Destroy job failed: ${jobResult.error}")
             }
             return ServiceResponse.success()
@@ -285,9 +310,10 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
         try {
             Cloud cloud = server.cloud
             def config = cloud.configMap
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
             def result = apiClient.listVirtualMachines(
                 config.apiUrl, config.apiKey, config.secretKey,
-                [id: server.externalId]
+                [id: server.externalId] + domainParams
             )
             if (result.success && result.data?.listvirtualmachinesresponse?.virtualmachine) {
                 def vm = result.data.listvirtualmachinesresponse.virtualmachine[0]
@@ -340,9 +366,41 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
         }
     }
 
-    private Map pollAsyncJob(String apiUrl, String apiKey, String secretKey, String jobId, int maxRetries = 30, int retryDelay = 5000) {
+    /**
+     * Inject Morpheus tags into CloudStack as resource tags on the VM.
+     */
+    private void applyTags(Map config, String vmId, String vmName, Map tags) {
+        try {
+            def allTags = [morpheus_name: vmName] + (tags ?: [:])
+            if (!allTags) return
+            def tagParams = [
+                resourceids : vmId,
+                resourcetype: 'UserVm',
+            ]
+            allTags.eachWithIndex { entry, idx ->
+                tagParams["tags[${idx}].key"]   = entry.key.toString()
+                tagParams["tags[${idx}].value"] = entry.value.toString()
+            }
+            if (config.domainId) {
+                tagParams.domainid = config.domainId
+            }
+            def result = apiClient.createTags(config.apiUrl, config.apiKey, config.secretKey, tagParams)
+            if (!result.success) {
+                log.warn("Failed to apply tags to VM ${vmId}: ${result.error}")
+            }
+        } catch (Exception e) {
+            log.warn("Error applying tags to VM ${vmId}: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Poll an async CloudStack job with exponential backoff.
+     * jobstatus: 0 = PENDING, 1 = SUCCESS, 2 = ERROR
+     */
+    private Map pollAsyncJobWithBackoff(String apiUrl, String apiKey, String secretKey, String jobId) {
+        long delay = ASYNC_INITIAL_DELAY_MS
         int attempts = 0
-        while (attempts < maxRetries) {
+        while (attempts < ASYNC_MAX_RETRIES) {
             def result = apiClient.queryAsyncJobResult(apiUrl, apiKey, secretKey, jobId)
             if (!result.success) {
                 return [success: false, error: result.error]
@@ -354,9 +412,12 @@ class CloudStackProvisionProvider implements WorkloadProvisionProvider {
                 def errorText = result.data?.queryasyncjobresultresponse?.jobresult?.errortext ?: 'Job failed'
                 return [success: false, error: errorText]
             }
-            Thread.sleep(retryDelay)
+            log.debug("Async job ${jobId} still pending (attempt ${attempts + 1}/${ASYNC_MAX_RETRIES}), waiting ${delay}ms")
+            Thread.sleep(delay)
+            // Exponential backoff with jitter, capped at max delay
+            delay = Math.min((long)(delay * 1.5 + (Math.random() * 1000).toLong()), ASYNC_MAX_DELAY_MS)
             attempts++
         }
-        return [success: false, error: "Async job timed out after ${maxRetries} attempts"]
+        return [success: false, error: "Async job ${jobId} timed out after ${ASYNC_MAX_RETRIES} attempts"]
     }
 }

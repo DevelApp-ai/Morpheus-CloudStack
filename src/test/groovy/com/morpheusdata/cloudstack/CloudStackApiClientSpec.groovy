@@ -140,4 +140,64 @@ class CloudStackApiClientSpec extends Specification {
             p.command == 'queryAsyncJobResult' && p.jobid == jobId
         })
     }
+
+    def "listDiskOfferings uses listDiskOfferings command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [listdiskofferingsresponse: [diskoffering: []]]]
+        }
+
+        when:
+        mockClient.listDiskOfferings('http://host/api', 'key', 'secret', [:])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p -> p.command == 'listDiskOfferings' })
+    }
+
+    def "createVolume uses createVolume command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.createVolume('http://host/api', 'key', 'secret', [name: 'vol1', diskofferingid: 'do-1', zoneid: 'z-1'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'createVolume' && p.name == 'vol1'
+        })
+    }
+
+    def "listVirtualMachinesMetrics uses listVirtualMachinesMetrics command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.listVirtualMachinesMetrics('http://host/api', 'key', 'secret', [id: 'vm-1'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'listVirtualMachinesMetrics' && p.id == 'vm-1'
+        })
+    }
+
+    def "createTags sends resourceids and resourcetype"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.createTags('http://host/api', 'key', 'secret', [
+            resourceids: 'vm-1', resourcetype: 'UserVm', 'tags[0].key': 'env', 'tags[0].value': 'prod'
+        ])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'createTags' && p.resourceids == 'vm-1' && p.resourcetype == 'UserVm'
+        })
+    }
 }

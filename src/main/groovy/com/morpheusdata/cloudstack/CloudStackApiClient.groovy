@@ -127,4 +127,39 @@ class CloudStackApiClient {
         def params = [command: 'queryAsyncJobResult', jobid: jobId]
         return callApi(apiUrl, apiKey, secretKey, params)
     }
+
+    Map listDiskOfferings(String apiUrl, String apiKey, String secretKey, Map extraParams = [:]) {
+        def params = [command: 'listDiskOfferings'] + extraParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
+
+    Map createVolume(String apiUrl, String apiKey, String secretKey, Map createParams) {
+        def params = [command: 'createVolume'] + createParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
+
+    Map attachVolume(String apiUrl, String apiKey, String secretKey, Map attachParams) {
+        def params = [command: 'attachVolume'] + attachParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
+
+    Map listVolumes(String apiUrl, String apiKey, String secretKey, Map extraParams = [:]) {
+        def params = [command: 'listVolumes'] + extraParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
+
+    Map listVirtualMachinesMetrics(String apiUrl, String apiKey, String secretKey, Map extraParams = [:]) {
+        def params = [command: 'listVirtualMachinesMetrics'] + extraParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
+
+    Map createTags(String apiUrl, String apiKey, String secretKey, Map tagParams) {
+        def params = [command: 'createTags'] + tagParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
+
+    Map listTags(String apiUrl, String apiKey, String secretKey, Map extraParams = [:]) {
+        def params = [command: 'listTags'] + extraParams
+        return callApi(apiUrl, apiKey, secretKey, params)
+    }
 }

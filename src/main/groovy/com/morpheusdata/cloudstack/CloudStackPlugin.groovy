@@ -14,6 +14,10 @@ class CloudStackPlugin extends Plugin {
         CloudStackCloudProvider cloudProvider = new CloudStackCloudProvider(this, this.morpheus)
         this.pluginProviders.put(cloudProvider.code, cloudProvider)
         addProvider(cloudProvider)
+
+        CloudStackZoneDatasetProvider zoneDataset = new CloudStackZoneDatasetProvider(this, this.morpheus)
+        this.pluginProviders.put(zoneDataset.code, zoneDataset)
+        addProvider(zoneDataset)
     }
 
     @Override

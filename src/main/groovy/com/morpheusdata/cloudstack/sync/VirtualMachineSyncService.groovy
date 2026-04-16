@@ -26,7 +26,8 @@ class VirtualMachineSyncService {
         log.debug("Syncing CloudStack VMs for cloud: ${cloud.name}")
         try {
             def config = cloud.configMap
-            def result = apiClient.listVirtualMachines(config.apiUrl, config.apiKey, config.secretKey, [:])
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
+            def result = apiClient.listVirtualMachines(config.apiUrl, config.apiKey, config.secretKey, domainParams)
             if (!result.success) {
                 log.error("Failed to list virtual machines: ${result.error}")
                 return

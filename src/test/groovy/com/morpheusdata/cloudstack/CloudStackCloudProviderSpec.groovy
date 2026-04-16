@@ -166,4 +166,35 @@ class CloudStackCloudProviderSpec extends Specification {
         then:
         providers.any { it.code == 'cloudstack-provision' }
     }
+
+    def "getComputeServerTypes returns at least one type"() {
+        when:
+        def types = provider.getComputeServerTypes()
+
+        then:
+        types != null
+        types.size() > 0
+        types.any { it.code == 'cloudstack-vm' }
+    }
+
+    def "getNetworkTypes returns isolated and shared network types"() {
+        when:
+        def types = provider.getNetworkTypes()
+
+        then:
+        types != null
+        types.size() >= 2
+        types.any { it.code == 'cloudstack-isolated' }
+        types.any { it.code == 'cloudstack-shared' }
+    }
+
+    def "getStorageVolumeTypes returns at least one type"() {
+        when:
+        def types = provider.getStorageVolumeTypes()
+
+        then:
+        types != null
+        types.size() > 0
+        types.any { it.code == 'cloudstack-disk' }
+    }
 }

@@ -12,10 +12,12 @@ import com.morpheusdata.model.Icon
 import com.morpheusdata.model.NetworkSubnetType
 import com.morpheusdata.model.NetworkType
 import com.morpheusdata.model.OptionType
+import com.morpheusdata.model.ServerStatsData
 import com.morpheusdata.model.StorageControllerType
 import com.morpheusdata.model.StorageVolumeType
 import com.morpheusdata.request.ValidateCloudRequest
 import com.morpheusdata.response.ServiceResponse
+import com.morpheusdata.cloudstack.sync.DiskOfferingSyncService
 import com.morpheusdata.cloudstack.sync.NetworkSyncService
 import com.morpheusdata.cloudstack.sync.ServicePlanSyncService
 import com.morpheusdata.cloudstack.sync.VirtualImageSyncService
@@ -176,12 +178,45 @@ class CloudStackCloudProvider implements CloudProvider {
 
     @Override
     Collection<ComputeServerType> getComputeServerTypes() {
-        return []
+        return [
+            new ComputeServerType(
+                code: 'cloudstack-vm',
+                name: 'CloudStack VM',
+                description: 'CloudStack virtual machine',
+                platform: 'linux',
+                nodeType: 'morpheus-vm',
+                managed: true,
+                reconfigureSupported: true,
+                hasAutomation: true,
+                vmHypervisor: false,
+                controlPower: true,
+                controlSuspend: false,
+                enabled: true,
+                provisionTypeCode: 'cloudstack-provision'
+            )
+        ]
     }
 
     @Override
     Collection<NetworkType> getNetworkTypes() {
-        return []
+        return [
+            new NetworkType(
+                code: 'cloudstack-isolated',
+                name: 'CloudStack Isolated Network',
+                description: 'CloudStack isolated network',
+                overlay: false,
+                creatable: false,
+                nameEditable: false
+            ),
+            new NetworkType(
+                code: 'cloudstack-shared',
+                name: 'CloudStack Shared Network',
+                description: 'CloudStack shared network',
+                overlay: false,
+                creatable: false,
+                nameEditable: false
+            )
+        ]
     }
 
     @Override
@@ -191,7 +226,17 @@ class CloudStackCloudProvider implements CloudProvider {
 
     @Override
     Collection<StorageVolumeType> getStorageVolumeTypes() {
-        return []
+        return [
+            new StorageVolumeType(
+                code: 'cloudstack-disk',
+                name: 'CloudStack Disk',
+                description: 'CloudStack disk volume',
+                displayOrder: 0,
+                defaultType: true,
+                enabled: true,
+                resizable: true
+            )
+        ]
     }
 
     @Override
@@ -272,6 +317,7 @@ class CloudStackCloudProvider implements CloudProvider {
             new ZoneSyncService(morpheusContext, apiClient, cloud).execute()
             new ServicePlanSyncService(morpheusContext, apiClient, cloud).execute()
             new VirtualImageSyncService(morpheusContext, apiClient, cloud).execute()
+            new DiskOfferingSyncService(morpheusContext, apiClient, cloud).execute()
         } catch (Exception e) {
             log.error("Error in daily refresh of CloudStack cloud: ${e.message}", e)
         }
@@ -281,6 +327,56 @@ class CloudStackCloudProvider implements CloudProvider {
     ServiceResponse deleteCloud(Cloud cloud) {
         log.debug("Deleting CloudStack cloud: ${cloud?.name}")
         return ServiceResponse.success()
+    }
+
+    ServiceResponse getServerDetails(ComputeServer computeServer) {
+        log.debug("Getting server details for: ${computeServer?.externalId}")
+        try {
+            def cloud = computeServer.cloud
+            def config = cloud.configMap
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
+            def result = apiClient.listVirtualMachines(
+                config.apiUrl, config.apiKey, config.secretKey,
+                [id: computeServer.externalId] + domainParams
+            )
+            if (result.success && result.data?.listvirtualmachinesresponse?.virtualmachine) {
+                return ServiceResponse.success(result.data.listvirtualmachinesresponse.virtualmachine[0])
+            }
+            return ServiceResponse.error("VM not found: ${computeServer.externalId}")
+        } catch (Exception e) {
+            log.error("Error getting server details: ${e.message}", e)
+            return ServiceResponse.error("Failed to get server details: ${e.message}")
+        }
+    }
+
+    @Override
+    List<ServerStatsData> getServerStats(ComputeServer computeServer, Map<String, Object> opts) {
+        log.debug("Getting server stats for: ${computeServer?.externalId}")
+        try {
+            def cloud = computeServer.cloud
+            def config = cloud.configMap
+            def domainParams = config.domainId ? [domainid: config.domainId] : [:]
+            def result = apiClient.listVirtualMachinesMetrics(
+                config.apiUrl, config.apiKey, config.secretKey,
+                [id: computeServer.externalId] + domainParams
+            )
+            if (result.success && result.data?.listvirtualmachinesmetricsresponse?.virtualmachine) {
+                def vm = result.data.listvirtualmachinesmetricsresponse.virtualmachine[0]
+                def stats = new ServerStatsData(
+                    maxMemory : computeServer.maxMemory,
+                    usedMemory: vm.memorykbs ? (vm.memorykbs as Long) * 1024L : 0L,
+                    freeMemory: computeServer.maxMemory ? computeServer.maxMemory - (vm.memorykbs ? (vm.memorykbs as Long) * 1024L : 0L) : 0L,
+                    cpuUsage  : vm.cpuused ? (vm.cpuused as String).replace('%', '').toFloat() / 100.0f : 0.0f,
+                    running   : vm.state?.toLowerCase() == 'running',
+                    date      : new Date()
+                )
+                return [stats]
+            }
+            return []
+        } catch (Exception e) {
+            log.error("Error getting server stats: ${e.message}", e)
+            return []
+        }
     }
 
     @Override
