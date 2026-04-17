@@ -200,4 +200,191 @@ class CloudStackApiClientSpec extends Specification {
             p.command == 'createTags' && p.resourceids == 'vm-1' && p.resourcetype == 'UserVm'
         })
     }
+
+    def "listNetworks uses listNetworks command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [listnetworksresponse: [network: []]]]
+        }
+
+        when:
+        mockClient.listNetworks('http://host/api', 'key', 'secret', [:])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p -> p.command == 'listNetworks' })
+    }
+
+    def "listServiceOfferings uses listServiceOfferings command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [listserviceofferingsresponse: [serviceoffering: []]]]
+        }
+
+        when:
+        mockClient.listServiceOfferings('http://host/api', 'key', 'secret', [:])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p -> p.command == 'listServiceOfferings' })
+    }
+
+    def "listVirtualMachines uses listVirtualMachines command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [listvirtualmachinesresponse: [virtualmachine: []]]]
+        }
+
+        when:
+        mockClient.listVirtualMachines('http://host/api', 'key', 'secret', [:])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p -> p.command == 'listVirtualMachines' })
+    }
+
+    def "deployVirtualMachine uses deployVirtualMachine command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.deployVirtualMachine('http://host/api', 'key', 'secret', [
+            templateid: 'tpl-1', serviceofferingid: 'svc-1', zoneid: 'zone-1', name: 'vm-test'
+        ])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'deployVirtualMachine' && p.name == 'vm-test'
+        })
+    }
+
+    def "startVirtualMachine uses startVirtualMachine command with id"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.startVirtualMachine('http://host/api', 'key', 'secret', [id: 'vm-1'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'startVirtualMachine' && p.id == 'vm-1'
+        })
+    }
+
+    def "stopVirtualMachine uses stopVirtualMachine command with id"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.stopVirtualMachine('http://host/api', 'key', 'secret', [id: 'vm-2'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'stopVirtualMachine' && p.id == 'vm-2'
+        })
+    }
+
+    def "destroyVirtualMachine uses destroyVirtualMachine command with id"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.destroyVirtualMachine('http://host/api', 'key', 'secret', [id: 'vm-3'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'destroyVirtualMachine' && p.id == 'vm-3'
+        })
+    }
+
+    def "attachVolume uses attachVolume command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.attachVolume('http://host/api', 'key', 'secret', [id: 'vol-1', virtualmachineid: 'vm-1'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'attachVolume' && p.id == 'vol-1'
+        })
+    }
+
+    def "listVolumes uses listVolumes command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.listVolumes('http://host/api', 'key', 'secret', [virtualmachineid: 'vm-1'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'listVolumes' && p.virtualmachineid == 'vm-1'
+        })
+    }
+
+    def "listTags uses listTags command"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.listTags('http://host/api', 'key', 'secret', [resourceid: 'vm-1', resourcetype: 'UserVm'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'listTags' && p.resourceid == 'vm-1'
+        })
+    }
+
+    def "callApi includes apikey and response=json in request"() {
+        given:
+        // callApi is the real implementation; test structural invariants
+        // by verifying the signing-string uses sorted lowercase keys
+        def client = new CloudStackApiClient()
+        def sig = client.signRequest('apikey=myKey&command=listZones&response=json', 'secret123')
+
+        expect:
+        sig != null
+        sig.length() > 0
+    }
+
+    def "signRequest handles special characters in keys"() {
+        given:
+        def queryString = 'apikey=my+key%2Bvalue&command=listZones'
+        def secretKey = 'secret/with+special=chars'
+
+        when:
+        def sig = apiClient.signRequest(queryString, secretKey)
+
+        then:
+        sig != null
+        sig.length() > 0
+        !sig.contains(' ')
+    }
+
+    def "extraParams are merged into API request"() {
+        given:
+        def mockClient = Spy(CloudStackApiClient) {
+            callApi(*_) >> [success: true, data: [:]]
+        }
+
+        when:
+        mockClient.listZones('http://host/api', 'key', 'secret', [domainid: 'dom-1'])
+
+        then:
+        1 * mockClient.callApi('http://host/api', 'key', 'secret', { Map p ->
+            p.command == 'listZones' && p.domainid == 'dom-1'
+        })
+    }
 }

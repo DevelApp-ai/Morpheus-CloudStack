@@ -68,7 +68,7 @@ class CloudStackZoneDatasetProvider implements DatasetProvider<Map, String> {
      */
     @Override
     Observable<Map> list(DatasetQuery query) {
-        def params = query?.params
+        def params = query?.parameters
         def apiUrl = params?.get('config.apiUrl') ?: params?.get('apiUrl')
         def apiKey = params?.get('config.apiKey') ?: params?.get('apiKey')
         def secretKey = params?.get('config.secretKey') ?: params?.get('secretKey')
